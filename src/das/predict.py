@@ -472,7 +472,7 @@ def predict(
         batch_size (int): number of chunks processed at once . Defaults to None (the default used during training).
                          Larger batches lead to faster inference.
                          Limited by memory size, in particular for GPUs which typically have 8GB.
-                         Large batch sizes lead to loss of samples since only complete batches are used.
+                         Without `pad`, large batch sizes lead to loss of samples since only complete batches are used.
         pad (bool): Append zeros to fill up batch. Otherwise the end can be cut.
                     Defaults to False
 
@@ -549,20 +549,16 @@ def predict(
         # figure out length in multiples of batches
         batch_len = params["batch_size"] * params["nb_hist"] + params["nb_hist"]
         x_len_original = len(x)
-        pad_len = 0
-        if np.remainder(len(x), batch_len) > 0:
-            pad_len = batch_len - np.remainder(len(x), batch_len)
-        # pad with end val to fill
+        # pad with end val to fill the last batch, plus one more batch: the generator skips a last, incomplete
+        # batch, so without the extra batch the predictions can stop short of the end of the recording
+        pad_len = (-len(x)) % batch_len + batch_len
         x = np.pad(x, ((0, pad_len), (0, 0)), mode="edge")
 
     class_probabilities = predict_probabilities(x, model, params, verbose, prepend_data_padding)
     temp_dir = class_probabilities.temp_dir
     if pad:
-        # set all song probs in padded section to zero to avoid out of bounds detections!
-        # assumes that the non-song class is at index 0
-        class_probabilities[-pad_len:, 1:] = 0
-        class_probabilities[-pad_len:, 0] = 1
-        # trim probs to original len of x
+        # trim probs to original len of x: this drops the padded section, so nothing is detected in it.
+        # (The probabilities are not as long as the padded x, so blanking `[-pad_len:]` here would blank real samples.)
         class_probabilities = class_probabilities[:x_len_original, :]
 
     events, segments = predict_song(

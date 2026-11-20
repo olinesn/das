@@ -473,7 +473,7 @@ def predict(
                          Larger batches lead to faster inference.
                          Limited by memory size, in particular for GPUs which typically have 8GB.
                          Without `pad`, large batch sizes lead to loss of samples since only complete batches are used.
-        pad (bool): Append zeros to fill up batch. Otherwise the end can be cut.
+        pad (bool): Append a mirror image of the end of the data to fill up batch. Otherwise the end can be cut.
                     Defaults to False
 
         event_thres (float): Confidence threshold for detecting peaks. Range 0..1. Defaults to 0.5.
@@ -495,7 +495,7 @@ def predict(
         segment_fillgap (float): Gap in seconds between adjacent segments to be filled. Useful for correcting brief lapses.
                                  Defaults to None.
 
-        pad (bool): prepend values (repeat last sample value) to fill the last batch.
+        pad (bool): append values (a mirror image of the end of the data) to fill the last batch.
                     Otherwise, the end of the data will not be annotated because the last, non-full batch will be skipped.
         prepend_data_padding (bool, optional): Restores samples that are ignored
                     in the beginning of the first and the end of the last chunk
@@ -549,10 +549,12 @@ def predict(
         # figure out length in multiples of batches
         batch_len = params["batch_size"] * params["nb_hist"] + params["nb_hist"]
         x_len_original = len(x)
-        # pad with end val to fill the last batch, plus one more batch: the generator skips a last, incomplete
-        # batch, so without the extra batch the predictions can stop short of the end of the recording
+        # pad to fill the last batch, plus one more batch: the generator skips a last, incomplete batch,
+        # so without the extra batch the predictions can stop short of the end of the recording.
+        # Pad with a mirror image of the end: repeating the last sample turns a large last sample into a
+        # step that the network can mistake for song in the last few ms of the recording.
         pad_len = (-len(x)) % batch_len + batch_len
-        x = np.pad(x, ((0, pad_len), (0, 0)), mode="edge")
+        x = np.pad(x, ((0, pad_len), (0, 0)), mode="reflect")
 
     class_probabilities = predict_probabilities(x, model, params, verbose, prepend_data_padding)
     temp_dir = class_probabilities.temp_dir

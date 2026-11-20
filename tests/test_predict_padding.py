@@ -59,3 +59,27 @@ def test_batch_size_does_not_change_predictions():
     for batch_size in (1, 3, 16):
         probs = predict.predict(x, model=model, params=_params(batch_size), verbose=0)[2]
         np.testing.assert_allclose(probs, ref, atol=1e-6)
+
+
+def test_padding_does_not_create_song_at_the_end():
+    """A large last sample must not turn into song through the padding after it.
+
+    The model calls song where the input summed over 9 samples exceeds 1.5. The recording is silent except for
+    its last sample (1.0), so no window inside the recording sums to more than 1. Repeating the last sample as
+    padding would put more 1s into the windows of the last samples and make them song.
+    """
+    kernel = np.zeros((9, 1, 2), np.float32)
+    kernel[:, 0, 1] = 10.0
+    model = keras.Sequential(
+        [keras.Input(shape=(NB_HIST, 1)), keras.layers.Conv1D(2, 9, padding="same"), keras.layers.Softmax()]
+    )
+    model.set_weights([kernel, np.array([0.0, -15.0], np.float32)])
+    for n in (1_000, 1_234, 4 * (4 * NB_HIST + NB_HIST)):
+        x = np.zeros((n, 1), np.float32)
+        x[-1] = 1.0
+        _, segments, probs, _ = predict.predict(
+            x, model=model, params=_params(4), verbose=0, segment_minlen=None, segment_fillgap=None
+        )
+        assert probs.shape == (n, 2)
+        assert probs[:, 1].max() < 0.5
+        assert len(segments["onsets_seconds"]) == 0
